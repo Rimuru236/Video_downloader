@@ -1,0 +1,74 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: streamvault-api
+    ports:
+      - "8000:8000"
+    # The backend container runs as uid:gid 1000:1000, not root (see
+    # Dockerfile.backend / DEP-1). If these host directories don't already
+    # exist (or exist but are owned by a different uid), Docker will create
+    # or leave them owned by something the container can't write to —
+    # `mkdir -p downloads logs config && chown -R 1000:1000 downloads logs
+    # config` on the host fixes that. The named `streamvault-db` volume
+    # below doesn't have this problem since Docker manages its ownership.
+    volumes:
+      - ./downloads:/app/downloads
+      - ./logs:/app/logs
+      - ./config:/app/config
+      - streamvault-db:/app/data
+    environment:
+      - SV_DATABASE_URL=sqlite+aiosqlite:////app/data/streamvault.db
+      - SV_DOWNLOAD_FOLDER=/app/downloads
+    restart: unless-stopped
+    # ARCH-5: /ready (not /health) — checks DB connectivity, FFmpeg
+    # presence, and disk headroom, not just "the process is up". A
+    # container that's alive but can't actually serve a download should
+    # get flagged unhealthy, not just left running.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    # DEP-3: without a ceiling, a runaway ffmpeg re-encode or a burst of
+    # concurrent downloads has nothing stopping it from taking down the
+    # host. 2 CPUs / 2GB is a reasonable default for this workload — raise
+    # it if you're running many large concurrent hardsub burns. Honored by
+    # modern `docker compose` without Swarm mode; ignored by the old,
+    # deprecated docker-compose v1 binary.
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: streamvault-ui
+    ports:
+      - "3000:8080"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    # DEP-4: previously no healthcheck at all — an orchestrator couldn't
+    # tell a broken static file serve from a healthy one. nginx:alpine has
+    # no curl, so wget (busybox, always present) --spider is the standard
+    # substitute here.
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    # DEP-3: nginx serving static files is lightweight — this is a much
+    # smaller ceiling than the backend's, not a copy-paste of it.
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+volumes:
+  streamvault-db:

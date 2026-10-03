@@ -1,0 +1,19 @@
+# Optional TLS override for docker-compose.yml — see the "TLS" section in
+# README and nginx-tls.conf.example before using this.
+#
+# Usage:
+#   cp nginx-tls.conf.example nginx-tls.conf   # then edit cert paths/domain if needed
+#   docker compose -f docker-compose.yml -f docker-compose.tls.yml up --build
+#
+# Requires ./certs/fullchain.pem and ./certs/privkey.pem to exist on the
+# host (see README for how to get a certificate, including a self-signed
+# one for local testing).
+
+services:
+  frontend:
+    volumes:
+      - ./nginx-tls.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    ports:
+      - "3000:8080"
+      - "3443:8443"

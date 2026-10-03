@@ -1,0 +1,31 @@
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY backend/ .
+
+RUN mkdir -p downloads logs config data
+
+# DEP-1: run as a non-root user. Fixed uid/gid (1000) rather than a
+# system-assigned one so it's predictable for the bind-mounted volumes in
+# docker-compose.yml — if you hit permission-denied writing to ./downloads,
+# ./logs, or ./config on the host, `chown -R 1000:1000` those host
+# directories (or override `user:` in compose to match your host uid/gid
+# instead). Port 8000 doesn't need CAP_NET_BIND_SERVICE, so nothing else
+# about the app needs elevated privileges.
+RUN groupadd -g 1000 streamvault && \
+    useradd -u 1000 -g streamvault -M -s /usr/sbin/nologin streamvault && \
+    chown -R streamvault:streamvault /app
+USER streamvault
+
+EXPOSE 8000
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
